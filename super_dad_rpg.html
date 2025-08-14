@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Dad: A Caça ao Tesouro</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <style>
+        body {
+            background-color: #111;
+            color: #fff;
+            font-family: 'Press Start 2P', cursive;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            border: 4px solid #fff;
+            width: 1024px;
+            height: 576px;
+        }
+        
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        
+        #ui-top {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 2;
+            display: flex;
+            gap: 30px;
+            align-items: center;
+        }
+
+        #score-display, #lives-display {
+            font-size: 1.5rem;
+            text-shadow: 2px 2px #000;
+        }
+        #score-display { color: #FFD700; }
+        #lives-display { color: #ff5757; }
+        
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+            font-size: 2rem;
+            text-align: center;
+            z-index: 3;
+        }
+
+        .start-button {
+            margin-top: 20px;
+            padding: 15px 30px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 1rem;
+            color: #fff;
+            background-color: #4CAF50;
+            border: 2px solid #fff;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="backgroundCanvas" width="1024" height="576" style="z-index: 0;"></canvas>
+        <canvas id="gameCanvas" width="1024" height="576" style="z-index: 1;"></canvas>
+        <div id="ui-top">
+            <div id="score-display">MOEDAS: 0</div>
+            <div id="lives-display">VIDAS: 5</div>
+        </div>
+        <div id="overlay">
+            <h1 id="game-message">A Caça ao Tesouro</h1>
+            <button id="start-button" class="start-button">Começar</button>
+        </div>
+    </div>
+
+    <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const backgroundCanvas = document.getElementById('backgroundCanvas');
+    const backgroundCtx = backgroundCanvas.getContext('2d');
+    const startButton = document.getElementById('start-button');
+    const overlay = document.getElementById('overlay');
+    const gameMessageEl = document.getElementById('game-message');
+    const scoreDisplay = document.getElementById('score-display');
+    const livesDisplay = document.getElementById('lives-display');
+
+    const gravity = 0.5;
+    let player, platforms, keys, cameraX, backgroundBuildings, streetlights, obstacles, collectibles, score, lives;
+    let audioInitialized = false;
+
+    let synth, bassSynth, kick, snare, melodyPart, bassPart, kickPart, snarePart;
+
+    function initAudio() {
+        if (audioInitialized) return;
+
+        synth = new Tone.FMSynth({
+            harmonicity: 3,
+            modulationIndex: 10,
+            envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 }
+        }).toDestination();
+        synth.volume.value = -15;
+
+        bassSynth = new Tone.MonoSynth({
+            oscillator: { type: 'sawtooth' },
+            envelope: { attack: 0.01, decay: 0.1, sustain: 0.2, release: 0.4 }
+        }).toDestination();
+        bassSynth.volume.value = -10;
+
+        kick = new Tone.MembraneSynth().toDestination();
+        snare = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.005, decay: 0.2, sustain: 0 }
+        }).toDestination();
+
+        const melody = ['A3', null, 'C4', 'E4', 'A4', null, 'G4', 'E4'];
+        const bassline = ['A1', null, 'F1', null, 'G1', null, 'E1', null];
+
+        melodyPart = new Tone.Sequence((time, note) => {
+            if(note) synth.triggerAttackRelease(note, '16n', time);
+        }, melody, '8n').start(0);
+
+        bassPart = new Tone.Sequence((time, note) => {
+            if(note) bassSynth.triggerAttackRelease(note, '4n', time);
+        }, bassline, '2n').start(0);
+
+        kickPart = new Tone.Loop(time => {
+            kick.triggerAttackRelease('C1', '8n', time);
+        }, '4n').start(0);
+
+        snarePart = new Tone.Loop(time => {
+            snare.triggerAttackRelease('8n', time);
+        }, '2n').start('4n');
+
+        Tone.Transport.bpm.value = 150;
+        audioInitialized = true;
+    }
+
+    class Character {
+        constructor({ position, dimensions, color }) {
+            this.position = position;
+            this.velocity = { x: 0, y: 0 };
+            this.width = dimensions.width;
+            this.height = dimensions.height;
+            this.color = color;
+            this.onGround = false;
+            this.isInvincible = false;
+        }
+
+        draw() {}
+
+        update() {
+            this.position.x += this.velocity.x;
+            this.position.y += this.velocity.y;
+
+            if (this.position.y + this.height + this.velocity.y < canvas.height) {
+                this.velocity.y += gravity;
+            } else {
+                this.velocity.y = 0;
+                this.position.y = canvas.height - this.height;
+                this.onGround = true;
+            }
+        }
+    }
+
+    class SuperDad extends Character {
+        draw() {
+            if (this.isInvincible && Math.floor(Date.now() / 100) % 2 === 0) {
+                return;
+            }
+
+            const x = this.position.x;
+            const y = this.position.y;
+            const w = this.width;
+            const h = this.height;
+            const skin = '#f0c2a2';
+            const suit = '#3a3a3a';
+            const suitHighlight = '#4a4a4a';
+            const hair = '#5b3a29';
+            const shoes = '#1a1a1a';
+
+            const legGradient = ctx.createLinearGradient(x, y, x + w, y);
+            legGradient.addColorStop(0, suit);
+            legGradient.addColorStop(1, suitHighlight);
+            ctx.fillStyle = legGradient;
+            ctx.fillRect(x + w * 0.2, y + h * 0.5, w * 0.6, h * 0.45);
+
+            ctx.fillStyle = shoes;
+            ctx.beginPath();
+            ctx.ellipse(x + w * 0.5, y + h * 0.98, w * 0.3, h * 0.05, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = legGradient;
+            ctx.beginPath();
+            ctx.moveTo(x + w * 0.1, y + h * 0.2);
+            ctx.lineTo(x + w * 0.9, y + h * 0.2);
+            ctx.lineTo(x + w * 0.7, y + h * 0.55);
+            ctx.lineTo(x + w * 0.3, y + h * 0.55);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = suit;
+            ctx.beginPath();
+            ctx.arc(x + w * 0.1, y + h * 0.35, w * 0.15, 0, Math.PI * 2);
+            ctx.arc(x + w * 0.9, y + h * 0.35, w * 0.15, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.moveTo(x + w / 2, y + h * 0.2);
+            ctx.lineTo(x + w * 0.3, y + h * 0.4);
+            ctx.lineTo(x + w * 0.7, y + h * 0.4);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = '#c00';
+            ctx.fillRect(x + w / 2 - 3, y + h * 0.2, 6, h * 0.25);
+            
+            ctx.fillStyle = skin;
+            ctx.beginPath();
+            ctx.arc(x + w / 2, y + h * 0.1, w * 0.3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = hair;
+            ctx.beginPath();
+            ctx.arc(x + w / 2, y + h * 0.1, w * 0.3, Math.PI, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.arc(x + w * 0.4, y + h * 0.1, w * 0.08, 0, Math.PI * 2);
+            ctx.arc(x + w * 0.6, y + h * 0.1, w * 0.08, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#3498db';
+            ctx.beginPath();
+            ctx.arc(x + w * 0.42, y + h * 0.1, w * 0.04, 0, Math.PI * 2);
+            ctx.arc(x + w * 0.58, y + h * 0.1, w * 0.04, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    class Platform {
+        constructor({ x, y, width, height }) {
+            this.position = { x, y };
+            this.width = width;
+            this.height = height;
+        }
+        draw() {
+            ctx.fillStyle = '#444';
+            ctx.fillRect(this.position.x, this.position.y, this.width, this.height);
+            ctx.fillStyle = '#333';
+            ctx.fillRect(this.position.x, this.position.y, this.width, 10);
+        }
+    }
+
+    class Obstacle {
+        constructor({ x, y, type, platform = null }) {
+            this.position = { x, y };
+            this.type = type;
+            this.platform = platform;
+            if (type === 'spider' || type === 'monkey') {
+                this.width = 40;
+                this.height = type === 'monkey' ? 40 : 30;
+                this.velocity = { x: 1 };
+            } else {
+                this.width = 30;
+                this.height = 50;
+                this.velocity = { x: 0 };
+            }
+        }
+
+        draw() {
+            if (this.type === 'spider') {
+                const gradient = ctx.createRadialGradient(this.position.x + this.width/2, this.position.y + this.height/2, 5, this.position.x + this.width/2, this.position.y + this.height/2, 20);
+                gradient.addColorStop(0, '#666');
+                gradient.addColorStop(1, '#111');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.position.x + this.width / 2, this.position.y + this.height / 2, this.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'red';
+                ctx.beginPath();
+                ctx.arc(this.position.x + this.width * 0.3, this.position.y + this.height * 0.3, 3, 0, Math.PI * 2);
+                ctx.arc(this.position.x + this.width * 0.7, this.position.y + this.height * 0.3, 3, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (this.type === 'monkey') {
+                ctx.fillStyle = '#6a4a3a';
+                ctx.beginPath();
+                ctx.arc(this.position.x + this.width / 2, this.position.y + this.height / 2, this.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#8B4513';
+                ctx.beginPath();
+                ctx.arc(this.position.x + this.width / 2, this.position.y + this.height / 2 - 2, this.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillRect(this.position.x - 5, this.position.y + this.height * 0.4, 10, 20);
+                ctx.fillRect(this.position.x + this.width - 5, this.position.y + this.height * 0.4, 10, 20);
+                ctx.fillStyle = '#f0c2a2';
+                ctx.beginPath();
+                ctx.arc(this.position.x + this.width / 2, this.position.y + this.height * 0.4, this.width * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'black';
+                ctx.beginPath();
+                ctx.arc(this.position.x + this.width * 0.4, this.position.y + this.height * 0.35, 2, 0, Math.PI * 2);
+                ctx.arc(this.position.x + this.width * 0.6, this.position.y + this.height * 0.35, 2, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                const gradient = ctx.createLinearGradient(this.position.x, this.position.y, this.position.x, this.position.y + this.height);
+                gradient.addColorStop(0, '#00ff00');
+                gradient.addColorStop(1, '#006400');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.moveTo(this.position.x + this.width / 2, this.position.y + this.height);
+                ctx.lineTo(this.position.x, this.position.y + this.height * 0.8);
+                ctx.lineTo(this.position.x + this.width / 2, this.position.y);
+                ctx.lineTo(this.position.x + this.width, this.position.y + this.height * 0.8);
+                ctx.closePath();
+                ctx.fill();
+            }
+        }
+
+        update() {
+            if (this.type === 'spider' || this.type === 'monkey') {
+                this.position.x += this.velocity.x;
+                if (this.position.x <= this.platform.position.x ||
+                    this.position.x + this.width >= this.platform.position.x + this.platform.width) {
+                    this.velocity.x *= -1;
+                }
+            }
+        }
+    }
+
+    class Collectible {
+        constructor({ x, y, type }) {
+            this.position = { x, y };
+            this.type = type;
+            this.width = type === 'diamond' ? 20 : 15;
+            this.height = type === 'diamond' ? 20 : 15;
+            this.value = type === 'diamond' ? 10 : 1;
+        }
+        draw() {
+            if (this.type === 'diamond') {
+                const gradient = ctx.createRadialGradient(this.position.x + this.width/2, this.position.y + this.height/2, 2, this.position.x + this.width/2, this.position.y + this.height/2, 10);
+                gradient.addColorStop(0, 'white');
+                gradient.addColorStop(1, '#00BFFF');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.moveTo(this.position.x + this.width / 2, this.position.y);
+                ctx.lineTo(this.position.x + this.width, this.position.y + this.height / 2);
+                ctx.lineTo(this.position.x + this.width / 2, this.position.y + this.height);
+                ctx.lineTo(this.position.x, this.position.y + this.height / 2);
+                ctx.closePath();
+                ctx.fill();
+            } else if (this.type === 'heart') {
+                ctx.fillStyle = '#ff5757';
+                ctx.beginPath();
+                ctx.moveTo(this.position.x + this.width / 2, this.position.y + this.height * 0.25);
+                ctx.arc(this.position.x + this.width * 0.25, this.position.y + this.height * 0.25, this.width * 0.25, Math.PI, 0);
+                ctx.arc(this.position.x + this.width * 0.75, this.position.y + this.height * 0.25, this.width * 0.25, Math.PI, 0);
+                ctx.lineTo(this.position.x + this.width / 2, this.position.y + this.height);
+                ctx.closePath();
+                ctx.fill();
+            } else { // coin
+                const gradient = ctx.createRadialGradient(this.position.x + this.width/2, this.position.y + this.height/2, 1, this.position.x + this.width/2, this.position.y + this.height/2, 8);
+                gradient.addColorStop(0, 'white');
+                gradient.addColorStop(1, '#FFD700');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.position.x + this.width / 2, this.position.y + this.height / 2, this.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+    }
+    
+    function drawStaticBackground() {
+        const gradient = backgroundCtx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, '#000033');
+        gradient.addColorStop(0.7, '#1a0033');
+        backgroundCtx.fillStyle = gradient;
+        backgroundCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+        backgroundCtx.fillStyle = 'rgba(240, 240, 240, 0.9)';
+        backgroundCtx.beginPath();
+        backgroundCtx.arc(850, 100, 50, 0, Math.PI * 2);
+        backgroundCtx.fill();
+
+        backgroundCtx.fillStyle = 'white';
+        for(let i = 0; i < 100; i++) {
+            const x = Math.random() * canvas.width;
+            const y = Math.random() * canvas.height * 0.7;
+            const radius = Math.random() * 1.5;
+            backgroundCtx.beginPath();
+            backgroundCtx.arc(x, y, radius, 0, Math.PI * 2);
+            backgroundCtx.fill();
+        }
+    }
+
+    function init() {
+        cameraX = 0;
+        score = 0;
+        lives = 5;
+        updateUI();
+
+        player = new SuperDad({
+            position: { x: 100, y: 300 },
+            dimensions: { width: 50, height: 100 },
+            color: 'blue'
+        });
+
+        platforms = [
+            new Platform({ x: 0, y: 500, width: 800, height: 76 }),
+            new Platform({ x: 900, y: 450, width: 300, height: 126 }),
+            new Platform({ x: 1300, y: 500, width: 500, height: 76 }),
+            new Platform({ x: 1900, y: 400, width: 200, height: 176 }),
+            new Platform({ x: 2200, y: 350, width: 200, height: 226 }),
+            new Platform({ x: 2500, y: 500, width: 1000, height: 76 })
+        ];
+        
+        obstacles = [];
+        collectibles = [];
+        backgroundBuildings = [];
+        streetlights = [];
+        let lastBuildingX = -200;
+        for (let i = 0; i < 20; i++) {
+            const x = lastBuildingX + 150 + Math.random() * 200;
+            const h = 200 + Math.random() * (canvas.height - 350);
+            const w = 80 + Math.random() * 100;
+            backgroundBuildings.push({x, y: canvas.height - h, w, h});
+            lastBuildingX = x;
+        }
+
+        let totalCoinsValue = 0;
+        platforms.forEach(p => {
+            for (let x = p.position.x; x < p.position.x + p.width; x += 30) {
+                collectibles.push(new Collectible({ x: x + 20, y: p.position.y - 30, type: 'coin' }));
+                totalCoinsValue += 1;
+            }
+
+            if (p.position.x > 500) {
+                for (let i = 0; i < Math.floor(p.width / 400); i++) {
+                    const x = p.position.x + 50 + Math.random() * (p.width - 100);
+                    if (Math.random() > 0.5) {
+                        obstacles.push(new Obstacle({ x, y: p.position.y - 30, type: 'spider', platform: p }));
+                    } else {
+                        obstacles.push(new Obstacle({ x, y: p.position.y - 50, type: 'plant' }));
+                    }
+                }
+            }
+            for (let x = p.position.x + 100; x < p.position.x + p.width - 100; x += 400) {
+                streetlights.push({x: x, y: p.position.y});
+            }
+        });
+        
+        const diamondPositions = [
+            {x: 1000, y: 400, platform: platforms[1]},
+            {x: 1500, y: 450, platform: platforms[2]},
+            {x: 2000, y: 350, platform: platforms[3]},
+            {x: 2800, y: 450, platform: platforms[5]},
+        ];
+        diamondPositions.forEach(pos => {
+            collectibles.push(new Collectible({ x: pos.x, y: pos.y, type: 'diamond' }));
+            totalCoinsValue += 10;
+            obstacles.push(new Obstacle({ x: pos.x - 50, y: pos.platform.position.y - 40, type: 'monkey', platform: pos.platform }));
+        });
+        
+        let platformIndex = 0;
+        while(totalCoinsValue < 120) {
+            const p = platforms[platformIndex % platforms.length];
+            const x = p.position.x + Math.random() * p.width;
+            collectibles.push(new Collectible({ x, y: p.position.y - 30, type: 'coin' }));
+            totalCoinsValue += 1;
+            platformIndex++;
+        }
+
+        collectibles.push(new Collectible({ x: 1600, y: 450, type: 'heart' }));
+        collectibles.push(new Collectible({ x: 2300, y: 300, type: 'heart' }));
+
+        keys = {
+            right: { pressed: false },
+            left: { pressed: false }
+        };
+
+        overlay.style.display = 'none';
+        if (!audioInitialized) {
+            initAudio();
+        }
+        Tone.start();
+        Tone.Transport.start();
+        animate();
+    }
+
+    function handlePlayerDeath(animationId) {
+        lives--;
+        updateUI();
+        if (lives <= 0) {
+            cancelAnimationFrame(animationId);
+            gameMessageEl.textContent = "Fim de Jogo!";
+            overlay.style.display = 'flex';
+            startButton.textContent = "Tentar Novamente";
+            Tone.Transport.stop();
+        } else {
+            player.position = { x: 100, y: 300 };
+            cameraX = 0;
+            player.isInvincible = true;
+            setTimeout(() => { player.isInvincible = false; }, 2000);
+        }
+    }
+
+    function updateUI() {
+        scoreDisplay.textContent = `MOEDAS: ${score}`;
+        livesDisplay.textContent = `VIDAS: ${lives}`;
+    }
+
+    function animate() {
+        const animationId = requestAnimationFrame(animate);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+        ctx.translate(-cameraX, 0);
+        
+        backgroundBuildings.forEach(building => {
+            ctx.fillStyle = `rgba(20, 20, 35, 0.8)`;
+            ctx.fillRect(building.x, building.y, building.w, building.h);
+            for(let j = building.y + 10; j < canvas.height - 10; j+= 30) {
+                for(let k = building.x + 10; k < building.x + building.w - 10; k+=30) {
+                    ctx.fillStyle = Math.random() > 0.3 ? '#ffff99' : '#444';
+                    ctx.fillRect(k, j, 8, 12);
+                }
+            }
+        });
+
+        platforms.forEach(platform => {
+            platform.draw();
+        });
+        
+        streetlights.forEach(light => {
+            ctx.fillStyle = '#333';
+            ctx.fillRect(light.x, light.y - 150, 10, 150);
+            ctx.fillStyle = '#FFD700';
+            ctx.beginPath();
+            ctx.arc(light.x + 5, light.y - 150, 15, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(light.x + 5, light.y - 150);
+            ctx.lineTo(light.x - 50, light.y);
+            ctx.lineTo(light.x + 60, light.y);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(255, 215, 0, 0.2)';
+            ctx.fill();
+        });
+
+        collectibles.forEach((collectible, index) => {
+            collectible.draw();
+            if (
+                player.position.x < collectible.position.x + collectible.width &&
+                player.position.x + player.width > collectible.position.x &&
+                player.position.y < collectible.position.y + collectible.height &&
+                player.position.y + player.height > collectible.position.y
+            ) {
+                if (collectible.type === 'heart') {
+                    lives++;
+                } else {
+                    score += collectible.value;
+                }
+                updateUI();
+                collectibles.splice(index, 1);
+            }
+        });
+
+        obstacles.forEach(obstacle => {
+            obstacle.update();
+            obstacle.draw();
+        });
+
+        player.update();
+        player.draw();
+
+        player.velocity.x = 0;
+        if (keys.left.pressed && player.position.x > cameraX + 100) {
+            player.velocity.x = -5;
+        } else if (keys.right.pressed) {
+            player.velocity.x = 5;
+        }
+
+        platforms.forEach(platform => {
+            if (
+                player.position.y + player.height <= platform.position.y &&
+                player.position.y + player.height + player.velocity.y >= platform.position.y &&
+                player.position.x + player.width >= platform.position.x &&
+                player.position.x <= platform.position.x + platform.width
+            ) {
+                player.velocity.y = 0;
+                player.position.y = platform.position.y - player.height;
+                player.onGround = true;
+            }
+        });
+
+        cameraX = player.position.x - 200;
+
+        obstacles.forEach(obstacle => {
+            if (
+                !player.isInvincible &&
+                player.position.x < obstacle.position.x + obstacle.width &&
+                player.position.x + player.width > obstacle.position.x &&
+                player.position.y < obstacle.position.y + obstacle.height &&
+                player.position.y + player.height > obstacle.position.y
+            ) {
+                handlePlayerDeath(animationId);
+            }
+        });
+
+        if (score >= 100) {
+            cancelAnimationFrame(animationId);
+            playWinAnimation();
+        }
+
+        ctx.restore();
+    }
+    
+    function playWinAnimation() {
+        let bankX = player.position.x + 300;
+        let animationStep = 0;
+        
+        function winLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.translate(-cameraX, 0);
+
+            // Redesenha o cenário
+            backgroundBuildings.forEach(building => {
+                ctx.fillStyle = `rgba(20, 20, 35, 0.8)`;
+                ctx.fillRect(building.x, building.y, building.w, building.h);
+            });
+            platforms.forEach(p => p.draw());
+            streetlights.forEach(l => {
+                ctx.fillStyle = '#333';
+                ctx.fillRect(l.x, l.y - 150, 10, 150);
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(l.x + 5, l.y - 150, 15, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Desenha o banco
+            ctx.fillStyle = '#c0c0c0';
+            ctx.fillRect(bankX, 350, 200, 150);
+            ctx.fillStyle = '#a0a0a0';
+            ctx.fillRect(bankX + 20, 370, 160, 130);
+            ctx.fillStyle = '#808080';
+            ctx.fillRect(bankX + 70, 420, 60, 80);
+            ctx.font = "20px 'Press Start 2P'";
+            ctx.fillStyle = 'black';
+            ctx.fillText("BANCO", bankX + 50, 400);
+
+            // Animação
+            if (player.position.x < bankX - player.width) {
+                player.position.x += 2;
+            } else {
+                animationStep++;
+                if (animationStep > 60) { // Espera um pouco
+                    gameMessageEl.textContent = "Você Venceu!";
+                    overlay.style.display = 'flex';
+                    startButton.textContent = "Jogar Novamente";
+                    Tone.Transport.stop();
+                    return;
+                }
+            }
+
+            player.draw();
+            ctx.restore();
+            requestAnimationFrame(winLoop);
+        }
+        winLoop();
+    }
+
+    window.addEventListener('keydown', ({ key }) => {
+        switch (key) {
+            case 'ArrowLeft': keys.left.pressed = true; break;
+            case 'ArrowRight': keys.right.pressed = true; break;
+            case 'ArrowUp':
+                if (player.onGround) {
+                    player.velocity.y = -15;
+                    player.onGround = false;
+                }
+                break;
+        }
+    });
+
+    window.addEventListener('keyup', ({ key }) => {
+        switch (key) {
+            case 'ArrowLeft': keys.left.pressed = false; break;
+            case 'ArrowRight': keys.right.pressed = false; break;
+        }
+    });
+    
+    drawStaticBackground();
+    startButton.addEventListener('click', init);
+    </script>
+</body>
+</html>
