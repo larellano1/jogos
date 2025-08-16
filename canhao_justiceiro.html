@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canhão Justiceiro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Bangers&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Bangers', cursive;
+            overflow: hidden;
+        }
+        canvas {
+            background: linear-gradient(to bottom, #87CEEB 0%, #aed6f1 100%); /* Sky blue gradient */
+            display: block;
+        }
+        #game-container {
+            position: relative;
+            width: 100%;
+            max-width: 1000px;
+            margin: auto;
+            border: 8px solid #4a5568;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        #message-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 2rem 4rem;
+            border-radius: 1rem;
+            text-align: center;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="bg-gray-800 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <h1 class="text-4xl md:text-6xl text-yellow-400 mb-4 tracking-wider">Canhão Justiceiro</h1>
+
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div id="message-box" class="hidden bg-black bg-opacity-75 text-white">
+            <h2 id="message-text" class="text-5xl mb-4"></h2>
+            <button id="restart-button" class="bg-yellow-500 hover:bg-yellow-600 text-black text-2xl py-2 px-6 rounded-lg shadow-lg transform hover:scale-105 transition-transform">
+                Jogar Novamente
+            </button>
+        </div>
+    </div>
+    <div id="ui-container" class="text-center mt-4 w-full max-w-4xl flex justify-between items-center px-4">
+        <p id="attempts-display" class="text-white text-3xl tracking-wider"></p>
+        <div id="wind-display" class="text-white text-3xl tracking-wider"></div>
+    </div>
+     <p class="text-white text-xl mt-2">Mova o mouse para mirar, clique para atirar!</p>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const messageBox = document.getElementById('message-box');
+        const messageText = document.getElementById('message-text');
+        const restartButton = document.getElementById('restart-button');
+        const attemptsDisplay = document.getElementById('attempts-display');
+        const windDisplay = document.getElementById('wind-display');
+
+        let canvasWidth, canvasHeight;
+
+        // --- Configurações do Jogo ---
+        const cannon = { x: 70, y: 0, baseWidth: 80, baseHeight: 40, barrelWidth: 100, barrelHeight: 30, angle: -Math.PI / 4, muzzleFlash: { active: false, duration: 5, timer: 0 } };
+        const projectile = { x: 0, y: 0, radius: 8, speed: 15, velocityX: 0, velocityY: 0, gravity: 0.3, isFlying: false };
+        const target = { x: 0, y: 0, radius: 50 };
+
+        let mouse = { x: 0, y: 0 };
+        let gameState = 'playing';
+        let particles = [], clouds = [], trees = [], birds = [];
+        let attemptsLeft = 3;
+        let wind = 0;
+
+        // --- Configurações de Áudio ---
+        let audioStarted = false;
+        let shootSound, epicExplosionSound;
+
+        function setupSounds() {
+            shootSound = new Tone.MembraneSynth({ pitchDecay: 0.01, octaves: 6, envelope: { attack: 0.001, decay: 0.2, sustain: 0 }, }).toDestination();
+            epicExplosionSound = new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.001, decay: 0.3, sustain: 0.1, release: 0.2 }, }).toDestination();
+        }
+
+        // --- Funções de Desenho do Cenário ---
+        function drawScenery() {
+            ctx.fillStyle = '#228B22'; ctx.fillRect(0, canvasHeight - 10, canvasWidth, 10);
+            trees.forEach(tree => { ctx.fillStyle = '#8B4513'; ctx.fillRect(tree.x, tree.y, tree.width, tree.height); ctx.beginPath(); ctx.arc(tree.x + tree.width / 2, tree.y, tree.radius, 0, Math.PI * 2); ctx.fillStyle = '#006400'; ctx.fill(); });
+            clouds.forEach(cloud => { ctx.beginPath(); ctx.arc(cloud.x, cloud.y, cloud.radius, 0, Math.PI * 2); ctx.arc(cloud.x + 30, cloud.y, cloud.radius * 1.2, 0, Math.PI * 2); ctx.arc(cloud.x - 30, cloud.y, cloud.radius * 1.1, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'; ctx.fill(); });
+            birds.forEach(bird => { ctx.beginPath(); ctx.moveTo(bird.x, bird.y); ctx.lineTo(bird.x + 10, bird.y + 10); ctx.lineTo(bird.x + 20, bird.y); ctx.strokeStyle = 'black'; ctx.lineWidth = 2; ctx.stroke(); });
+        }
+
+        // --- Funções de Desenho Principais ---
+        function drawCannon() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; ctx.beginPath(); ctx.ellipse(cannon.x, cannon.y + cannon.baseHeight, cannon.baseWidth / 1.5, 10, 0, 0, Math.PI * 2); ctx.fill();
+            const baseGradient = ctx.createLinearGradient(cannon.x - cannon.baseWidth / 2, cannon.y, cannon.x + cannon.baseWidth / 2, cannon.y); baseGradient.addColorStop(0, '#5A6778'); baseGradient.addColorStop(0.5, '#2D3748'); baseGradient.addColorStop(1, '#5A6778'); ctx.fillStyle = baseGradient; ctx.fillRect(cannon.x - cannon.baseWidth / 2, cannon.y, cannon.baseWidth, cannon.baseHeight); ctx.beginPath(); ctx.arc(cannon.x, cannon.y, cannon.baseWidth/2.5, 0, Math.PI * 2); ctx.fill();
+            ctx.save(); ctx.translate(cannon.x, cannon.y); ctx.rotate(cannon.angle);
+            const barrelGradient = ctx.createLinearGradient(0, -cannon.barrelHeight / 2, 0, cannon.barrelHeight / 2); barrelGradient.addColorStop(0, '#A0AEC0'); barrelGradient.addColorStop(0.5, '#4A5568'); barrelGradient.addColorStop(1, '#A0AEC0'); ctx.fillStyle = barrelGradient; ctx.fillRect(0, -cannon.barrelHeight / 2, cannon.barrelWidth, cannon.barrelHeight);
+            if (cannon.muzzleFlash.active) drawMuzzleFlash();
+            ctx.restore();
+        }
+
+        function drawMuzzleFlash() { const flashSize = 30; ctx.fillStyle = `rgba(255, 200, 0, ${cannon.muzzleFlash.timer / cannon.muzzleFlash.duration})`; ctx.beginPath(); for (let i = 0; i < 5; i++) { ctx.lineTo(cannon.barrelWidth + Math.cos(i * 2 * Math.PI / 5 * 2) * flashSize, Math.sin(i * 2 * Math.PI / 5 * 2) * flashSize); } ctx.closePath(); ctx.fill(); }
+        function drawProjectile() { if (projectile.isFlying) { ctx.beginPath(); ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2); ctx.fillStyle = 'black'; ctx.fill(); } }
+        
+        function drawTarget() {
+            const colors = ['#000000', '#FFFFFF', '#D32F2F', '#FFFFFF', '#000000']; // Preto, Branco, Vermelho...
+            for (let i = 0; i < 5; i++) {
+                ctx.beginPath();
+                ctx.arc(target.x, target.y, target.radius * (1 - i * 0.2), 0, Math.PI * 2);
+                ctx.fillStyle = colors[i];
+                ctx.fill();
+            }
+            // Bullseye
+            ctx.beginPath();
+            ctx.arc(target.x, target.y, target.radius * 0.1, 0, Math.PI * 2);
+            ctx.fillStyle = '#D32F2F';
+            ctx.fill();
+        }
+        
+        function drawParticles() { for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fillStyle = `rgba(255, ${p.life * 2}, 0, ${p.life / 100})`; ctx.fill(); p.x += p.vx; p.y += p.vy; p.life--; if (p.life <= 0) particles.splice(i, 1); } }
+
+        // --- Lógica de Animação e Jogo ---
+        function updateScenery() {
+            clouds.forEach(cloud => { cloud.x += cloud.speed; if (cloud.x - cloud.radius > canvasWidth) cloud.x = -cloud.radius * 2; });
+            birds.forEach(bird => { bird.x += bird.speed; if (bird.x > canvasWidth) bird.x = -20; });
+        }
+
+        function update() {
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+            updateScenery();
+            drawScenery();
+            drawCannon();
+            
+            if (gameState === 'win' || gameState === 'lose') {
+                drawProjectile();
+                drawParticles();
+                if (gameState === 'lose') drawTarget();
+                requestAnimationFrame(update);
+                return;
+            }
+
+            if (cannon.muzzleFlash.active) { cannon.muzzleFlash.timer--; if (cannon.muzzleFlash.timer <= 0) cannon.muzzleFlash.active = false; }
+
+            if (projectile.isFlying) {
+                projectile.velocityX += wind; // Aplica o vento
+                projectile.velocityY += projectile.gravity;
+                projectile.x += projectile.velocityX;
+                projectile.y += projectile.velocityY;
+
+                const dx = projectile.x - target.x, dy = projectile.y - target.y;
+                if (Math.sqrt(dx * dx + dy * dy) < projectile.radius + (target.radius * 0.1)) { // Acertou o bullseye
+                    gameState = 'win';
+                    projectile.isFlying = false;
+                    epicExplosionSound.triggerAttackRelease("0.5");
+                    createExplosion(projectile.x, projectile.y);
+                    showMessage('Na Mosca!');
+                }
+
+                if (projectile.y > canvasHeight || projectile.x > canvasWidth || projectile.x < 0) {
+                    projectile.isFlying = false;
+                    if (attemptsLeft > 0) repositionTarget();
+                    if (attemptsLeft <= 0 && gameState === 'playing') {
+                        gameState = 'lose';
+                        showMessage('Você Perdeu!');
+                    }
+                }
+            }
+
+            drawTarget();
+            drawProjectile();
+            drawParticles();
+            requestAnimationFrame(update);
+        }
+
+        function createExplosion(x, y) { for (let i = 0; i < 30; i++) { particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5, size: Math.random() * 6 + 2, life: Math.random() * 60 + 50 }); } }
+        function aimCannon(event) { if (gameState !== 'playing') return; const rect = canvas.getBoundingClientRect(); mouse.x = event.clientX - rect.left; mouse.y = event.clientY - rect.top; const dx = mouse.x - cannon.x, dy = mouse.y - cannon.y; cannon.angle = Math.atan2(dy, dx); }
+
+        function fireCannon() {
+            if (projectile.isFlying || gameState !== 'playing' || attemptsLeft <= 0) return;
+            if (!audioStarted) { Tone.start(); setupSounds(); audioStarted = true; }
+            shootSound.triggerAttackRelease("C4", "8n");
+            attemptsLeft--;
+            updateAttemptsUI();
+            projectile.isFlying = true;
+            projectile.x = cannon.x + Math.cos(cannon.angle) * cannon.barrelWidth;
+            projectile.y = cannon.y + Math.sin(cannon.angle) * cannon.barrelWidth;
+            projectile.velocityX = Math.cos(cannon.angle) * projectile.speed;
+            projectile.velocityY = Math.sin(cannon.angle) * projectile.speed;
+            cannon.muzzleFlash.active = true;
+            cannon.muzzleFlash.timer = cannon.muzzleFlash.duration;
+        }
+        
+        function showMessage(text) { messageText.textContent = text; messageBox.classList.remove('hidden'); }
+        function updateAttemptsUI() { attemptsDisplay.textContent = `Tentativas: ${attemptsLeft}`; }
+        
+        function generateWind() {
+            wind = (Math.random() - 0.5) * 0.05; // Pequeno valor para o vento
+            let windSpeed = Math.abs(wind * 100).toFixed(1);
+            let windDirection = wind > 0 ? "→" : "←";
+            windDisplay.innerHTML = `Vento: ${windDirection} ${windSpeed}`;
+        }
+
+        function repositionTarget() {
+            target.x = canvasWidth / 2 + Math.random() * (canvasWidth / 2 - target.radius - 20);
+            target.y = canvasHeight - target.radius - 10 - Math.random() * (canvasHeight / 4);
+        }
+
+        function resetGame() {
+            gameState = 'playing';
+            messageBox.classList.add('hidden');
+            projectile.isFlying = false;
+            particles = [];
+            attemptsLeft = 3;
+            updateAttemptsUI();
+            generateWind();
+            repositionTarget();
+            if (!update.isRunning) { update.isRunning = true; update(); }
+        }
+
+        function initializeScenery() {
+            clouds = []; for (let i = 0; i < 3; i++) { clouds.push({ x: Math.random() * canvasWidth, y: Math.random() * canvasHeight / 3 + 20, radius: Math.random() * 20 + 20, speed: Math.random() * 0.3 + 0.1 }); }
+            trees = []; for (let i = 0; i < 5; i++) { const x = Math.random() * canvasWidth, height = Math.random() * 50 + 40; trees.push({ x: x, y: canvasHeight - height - 10, width: 20, height: height, radius: Math.random() * 15 + 25 }); }
+            birds = []; for (let i = 0; i < 2; i++) { birds.push({ x: Math.random() * canvasWidth, y: Math.random() * canvasHeight / 4 + 20, speed: Math.random() * 1 + 0.5 }); }
+        }
+
+        function resizeCanvas() {
+            const container = document.getElementById('game-container');
+            canvasWidth = container.clientWidth;
+            canvasHeight = canvasWidth * 0.6;
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            cannon.y = canvasHeight - cannon.baseHeight - 10;
+            initializeScenery();
+            resetGame();
+        }
+
+        // --- Inicialização ---
+        window.addEventListener('resize', resizeCanvas);
+        canvas.addEventListener('mousemove', aimCannon);
+        canvas.addEventListener('click', fireCannon);
+        restartButton.addEventListener('click', resizeCanvas);
+        resizeCanvas();
+    </script>
+
+</body>
+</html>
