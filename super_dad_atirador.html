@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super-Dad</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Bangers&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Bangers', cursive;
+            touch-action: manipulation;
+        }
+        .health-bar-inner {
+            transition: width 0.5s ease-in-out;
+        }
+        .character {
+            transition: transform 0.2s ease-in-out;
+        }
+        .damage-animation {
+            animation: shake 0.4s;
+        }
+        .move-right-animation {
+            transform: translateX(20px);
+        }
+        .move-left-animation {
+            transform: translateX(-20px);
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+            20%, 40%, 60%, 80% { transform: translateX(10px); }
+        }
+        @keyframes alarm-flash {
+            0%, 100% { background-color: #400; }
+            50% { background-color: #f00; }
+        }
+        .alarm {
+            animation: alarm-flash 1s infinite;
+        }
+        .tie {
+            width: 0;
+            height: 0;
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-top: 40px solid #dc2626;
+            position: absolute;
+        }
+        @keyframes bubble {
+            0% { transform: translateY(0) scale(1); opacity: 1; }
+            100% { transform: translateY(-10px) scale(1.2); opacity: 0; }
+        }
+        .bubble {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background-color: #a7f3d0;
+            border-radius: 50%;
+            animation: bubble 1s infinite;
+        }
+        
+        /* Novas Animações de Tiro e Escudo */
+        .arm {
+            transition: transform 0.2s ease-out;
+            transform-origin: top left;
+        }
+        .shooting .arm {
+            transform: rotate(-45deg) scale(1.1);
+        }
+        .enemy-shooting .arm {
+            transform: rotate(45deg) scale(1.1);
+        }
+        .shot {
+            position: absolute;
+            width: 12px;
+            height: 4px;
+            background-color: #fef08a; /* yellow-200 */
+            border-radius: 2px;
+            box-shadow: 0 0 10px #facc15; /* yellow-400 */
+            opacity: 0;
+        }
+        .shooting .shot {
+            animation: fire-right 0.3s ease-out;
+        }
+        .enemy-shooting .shot {
+            animation: fire-left 0.3s ease-out;
+        }
+        @keyframes fire-right {
+            0% { transform: translateX(50px) scaleX(1); opacity: 1; }
+            100% { transform: translateX(400px) scaleX(2); opacity: 0; }
+        }
+        @keyframes fire-left {
+            0% { transform: translateX(-50px) scaleX(1); opacity: 1; }
+            100% { transform: translateX(-400px) scaleX(2); opacity: 0; }
+        }
+        .shield {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 120%;
+            padding-bottom: 120%;
+            background: radial-gradient(circle, rgba(59, 130, 246, 0.1), rgba(59, 130, 246, 0.7));
+            border-radius: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            opacity: 0;
+            transition: all 0.2s ease-out;
+        }
+        .defending .shield {
+            transform: translate(-50%, -50%) scale(1);
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="bg-gray-800 text-white flex items-center justify-center min-h-screen">
+
+    <div id="start-screen" class="text-center">
+        <h1 class="text-6xl md:text-8xl text-yellow-400 tracking-wider">Super-Dad</h1>
+        <p class="text-2xl mt-4 mb-8">O Dr. Guihojo está roubando o banco!</p>
+        <button id="start-button" class="bg-green-500 hover:bg-green-600 text-white text-3xl py-4 px-8 rounded-lg shadow-lg transform hover:scale-105 transition-transform">
+            Iniciar Jogo
+        </button>
+    </div>
+
+    <div id="game-container" class="hidden w-full max-w-4xl mx-auto p-4">
+        <!-- Luz de Alarme -->
+        <div id="alarm-light" class="h-8 w-full rounded-t-lg"></div>
+
+        <!-- Cenário do Jogo -->
+        <div class="bg-gray-700 border-8 border-gray-900 rounded-b-lg p-4 md:p-8 relative overflow-hidden" style="background: linear-gradient(to bottom, #3a3a3a, #1a1a1a);">
+            <!-- Fundo com Dinheiro -->
+            <div class="absolute inset-0 z-0 opacity-20">
+                <div class="absolute bottom-0 left-0 w-1/4 h-1/3 bg-green-800 rounded-t-full"></div>
+                <div class="absolute bottom-0 left-10 w-1/5 h-1/4 bg-green-700 rounded-t-full"></div>
+                <div class="absolute bottom-0 right-0 w-1/3 h-1/2 bg-yellow-500 rounded-t-lg"></div>
+                <div class="absolute bottom-0 right-5 w-1/4 h-1/3 bg-yellow-400 rounded-t-lg"></div>
+                <span class="absolute bottom-10 left-5 text-6xl transform -rotate-12">💰</span>
+                <span class="absolute bottom-20 right-10 text-8xl transform rotate-12">💎</span>
+                 <span class="absolute bottom-5 right-2/4 text-6xl transform rotate-6">💵</span>
+            </div>
+
+            <!-- Personagens e UI -->
+            <div class="relative z-10">
+                <!-- Informações dos Personagens -->
+                <div class="flex justify-between items-start mb-8 md:mb-16">
+                    <!-- Super-Dad Info -->
+                    <div class="w-2/5">
+                        <h2 class="text-2xl md:text-4xl text-blue-400">Super-Dad</h2>
+                        <div class="w-full bg-gray-900 rounded-full h-6 md:h-8 border-2 border-blue-400">
+                            <div id="player-health" class="bg-blue-500 h-full rounded-full health-bar-inner" style="width: 100%;"></div>
+                        </div>
+                    </div>
+                    <!-- Dr. Guihojo Info -->
+                    <div class="w-2/5 text-right">
+                        <h2 class="text-2xl md:text-4xl text-red-400">Dr. Guihojo</h2>
+                        <div class="w-full bg-gray-900 rounded-full h-6 md:h-8 border-2 border-red-400">
+                            <div id="enemy-health" class="bg-red-500 h-full rounded-full health-bar-inner" style="width: 100%;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Arena dos Personagens -->
+                <div class="flex justify-between items-end h-64 px-8">
+                    <!-- Super-Dad (de Terno) -->
+                    <div id="player" class="character relative w-32 h-48">
+                        <div class="shield"></div>
+                        <div class="shot" style="top: 50%; left: 50%;"></div>
+                        <!-- Cabeça -->
+                        <div class="absolute top-4 left-1/2 -translate-x-1/2 w-14 h-14 bg-yellow-200 rounded-full z-20">
+                            <!-- Cabelo -->
+                            <div class="absolute -top-2 left-1/2 -translate-x-1/2 w-12 h-6 bg-gray-800 rounded-t-full"></div>
+                            <!-- Rosto -->
+                            <div class="absolute w-2 h-2 bg-black rounded-full top-5 left-3"></div>
+                            <div class="absolute w-2 h-2 bg-black rounded-full top-5 right-3"></div>
+                            <div class="absolute w-6 h-3 border-b-2 border-black rounded-b-full top-7 left-1/2 -translate-x-1/2"></div>
+                        </div>
+                        <!-- Braço com Revólver -->
+                        <div class="arm absolute top-20 left-12 w-16 h-6 bg-gray-700 rounded-lg z-30 flex items-center">
+                            <div class="revolver w-8 h-4 bg-gray-900 rounded ml-auto"></div>
+                        </div>
+                        <!-- Corpo (Terno) -->
+                        <div class="absolute top-12 left-1/2 -translate-x-1/2 w-20 h-24 bg-gray-800 rounded-t-lg flex justify-center pt-2 z-10">
+                            <div class="w-12 h-4 bg-white" style="clip-path: polygon(0 0, 100% 0, 80% 100%, 20% 100%);"></div>
+                            <div class="tie top-4"></div>
+                            <div class="absolute bg-yellow-400 w-6 h-6 flex items-center justify-center text-black text-sm font-bold rounded-full top-9">D</div>
+                        </div>
+                        <!-- Pernas (Calças) -->
+                        <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-20 h-12 flex justify-between">
+                            <div class="w-8 h-full bg-gray-800 rounded-b-md"></div>
+                            <div class="w-8 h-full bg-gray-800 rounded-b-md"></div>
+                        </div>
+                    </div>
+
+                    <!-- Dr. Guihojo (de Jaleco) -->
+                    <div id="enemy" class="character relative w-32 h-48">
+                        <div class="shield"></div>
+                        <div class="shot" style="top: 50%; right: 50%;"></div>
+                        <!-- Cabeça -->
+                        <div class="absolute top-4 left-1/2 -translate-x-1/2 w-16 h-16 bg-green-200 rounded-full z-10">
+                            <div class="absolute w-6 h-6 border-2 border-black rounded-full top-4 left-2"></div>
+                            <div class="absolute w-6 h-6 border-2 border-black rounded-full top-4 right-2"></div>
+                            <div class="absolute w-2 h-1 bg-black top-7 left-[26px]"></div>
+                            <div class="absolute w-6 h-2 border-t-2 border-black rounded-t-lg top-10 left-1/2 -translate-x-1/2"></div>
+                        </div>
+                        <!-- Braço com Revólver -->
+                        <div class="arm absolute top-20 right-12 w-16 h-6 bg-gray-200 rounded-lg z-30 flex items-center">
+                            <div class="revolver w-8 h-4 bg-gray-900 rounded mr-auto"></div>
+                        </div>
+                        <!-- Corpo (Jaleco) -->
+                        <div class="absolute top-12 left-1/2 -translate-x-1/2 w-24 h-24 bg-white rounded-t-lg flex justify-center text-black">
+                            <div class="absolute top-4 left-2 w-8 h-10 bg-gray-300 rounded-b-md">
+                                <div class="w-full h-1 bg-gray-400"></div>
+                                <div class="absolute bottom-1 left-1 w-6 h-6 bg-purple-500 rounded-full">
+                                    <div class="bubble" style="bottom: 5px; left: 3px; animation-delay: 0s;"></div>
+                                    <div class="bubble" style="bottom: 5px; left: 7px; animation-delay: 0.5s;"></div>
+                                </div>
+                            </div>
+                            <div class="bg-green-400 w-10 h-10 flex items-center justify-center text-black text-2xl font-bold rounded-full mt-4">G</div>
+                        </div>
+                        <!-- Pernas -->
+                        <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-24 h-10 flex justify-around">
+                            <div class="w-8 h-full bg-gray-900 rounded-b-md"></div>
+                            <div class="w-8 h-full bg-gray-900 rounded-b-md"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controles (agora com teclado) -->
+        <div id="controls-display" class="bg-gray-900 rounded-b-lg p-4 text-center text-xl tracking-wider">
+            <span>[ESPAÇO] para Atacar</span>
+            <span class="mx-4">|</span>
+            <span>[V] para Bloquear</span>
+            <span class="mx-4">|</span>
+            <span>[← →] para Mover</span>
+        </div>
+        
+        <div class="hidden">
+            <button id="attack-button"></button>
+            <button id="defend-button"></button>
+        </div>
+
+        <!-- Tela de Fim de Jogo -->
+        <div id="game-over-screen" class="hidden absolute inset-0 bg-black bg-opacity-75 flex flex-col items-center justify-center z-20">
+            <h2 id="game-over-message" class="text-6xl md:text-8xl text-yellow-400 mb-8"></h2>
+            <button id="restart-button" class="bg-yellow-500 hover:bg-yellow-600 text-black text-3xl py-4 px-8 rounded-lg shadow-lg transform hover:scale-105 transition-transform">Jogar Novamente</button>
+        </div>
+    </div>
+
+    <script>
+        // Elementos do DOM
+        const startScreen = document.getElementById('start-screen');
+        const gameContainer = document.getElementById('game-container');
+        const startButton = document.getElementById('start-button');
+        const alarmLight = document.getElementById('alarm-light');
+        const playerHealthBar = document.getElementById('player-health');
+        const enemyHealthBar = document.getElementById('enemy-health');
+        const attackButton = document.getElementById('attack-button');
+        const defendButton = document.getElementById('defend-button');
+        const playerElement = document.getElementById('player');
+        const enemyElement = document.getElementById('enemy');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const gameOverMessage = document.getElementById('game-over-message');
+        const restartButton = document.getElementById('restart-button');
+
+        // Estado do Jogo
+        let playerHealth = 100;
+        let enemyHealth = 100;
+        let isPlayerDefending = false;
+        let isGameOver = false;
+        let canPerformAction = true;
+        let alarmSound;
+
+        // Inicializa o som do alarme com Tone.js
+        function setupAlarmSound() {
+            const synth = new Tone.Synth({
+                oscillator: { type: 'square' },
+                envelope: {
+                    attack: 0.01,
+                    decay: 0.1,
+                    sustain: 0.2,
+                    release: 0.1,
+                },
+            }).toDestination();
+
+            alarmSound = new Tone.Loop(time => {
+                synth.triggerAttackRelease('A5', '8n', time);
+                synth.triggerAttackRelease('E6', '8n', time + 0.25);
+            }, '0.5s');
+        }
+
+        // Inicia o jogo
+        startButton.addEventListener('click', () => {
+            Tone.start();
+            setupAlarmSound();
+            alarmSound.start(0);
+            Tone.Transport.start();
+            startScreen.classList.add('hidden');
+            gameContainer.classList.remove('hidden');
+            resetGame();
+        });
+
+        attackButton.addEventListener('click', () => {
+            if (isGameOver || !canPerformAction) return;
+            playerTurn(true);
+        });
+
+        defendButton.addEventListener('click', () => {
+            if (isGameOver || !canPerformAction) return;
+            playerTurn(false);
+        });
+        
+        restartButton.addEventListener('click', () => {
+            gameOverScreen.classList.add('hidden');
+            resetGame();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (isGameOver || gameContainer.classList.contains('hidden')) return;
+            switch (e.code) {
+                case 'Space':
+                    e.preventDefault();
+                    attackButton.click();
+                    break;
+                case 'KeyV':
+                    defendButton.click();
+                    break;
+                case 'ArrowRight':
+                    playerElement.classList.add('move-right-animation');
+                    setTimeout(() => playerElement.classList.remove('move-right-animation'), 200);
+                    break;
+                case 'ArrowLeft':
+                    playerElement.classList.add('move-left-animation');
+                    setTimeout(() => playerElement.classList.remove('move-left-animation'), 200);
+                    break;
+            }
+        });
+
+        function playerTurn(isAttacking) {
+            canPerformAction = false;
+            isPlayerDefending = false; 
+            playerElement.classList.remove('defending');
+
+            if (isAttacking) {
+                playerElement.classList.add('shooting');
+                const damage = Math.floor(Math.random() * 10) + 15;
+                enemyHealth = Math.max(0, enemyHealth - damage);
+                
+                setTimeout(() => {
+                    updateHealthBars();
+                    enemyElement.classList.add('damage-animation');
+                    playerElement.classList.remove('shooting');
+                }, 300);
+
+            } else {
+                isPlayerDefending = true;
+                playerElement.classList.add('defending');
+            }
+
+            setTimeout(() => {
+                enemyElement.classList.remove('damage-animation');
+                if (checkGameOver()) return;
+                setTimeout(enemyTurn, 750);
+            }, 400);
+        }
+
+        function enemyTurn() {
+            enemyElement.classList.add('enemy-shooting');
+            let damage = Math.floor(Math.random() * 10) + 10;
+            if (isPlayerDefending) {
+                damage = 0; // Bloqueio total do dano
+            }
+            
+            setTimeout(() => {
+                playerHealth = Math.max(0, playerHealth - damage);
+                updateHealthBars();
+                if (damage > 0) {
+                   playerElement.classList.add('damage-animation');
+                }
+                enemyElement.classList.remove('enemy-shooting');
+            }, 300);
+
+            setTimeout(() => {
+                playerElement.classList.remove('damage-animation');
+                if (checkGameOver()) return;
+                canPerformAction = true;
+            }, 700);
+        }
+
+        function updateHealthBars() {
+            playerHealthBar.style.width = `${playerHealth}%`;
+            enemyHealthBar.style.width = `${enemyHealth}%`;
+        }
+
+        function checkGameOver() {
+            if (playerHealth <= 0) {
+                endGame('Você Perdeu!');
+                return true;
+            }
+            if (enemyHealth <= 0) {
+                endGame('Você Venceu!');
+                return true;
+            }
+            return false;
+        }
+
+        function endGame(message) {
+            isGameOver = true;
+            gameOverMessage.textContent = message;
+            gameOverScreen.classList.remove('hidden');
+            if (alarmSound) alarmSound.stop();
+            Tone.Transport.stop();
+        }
+
+        function resetGame() {
+            playerHealth = 100;
+            enemyHealth = 100;
+            isPlayerDefending = false;
+            isGameOver = false;
+            canPerformAction = true;
+            updateHealthBars();
+            playerElement.classList.remove('damage-animation', 'defending', 'shooting');
+            enemyElement.classList.remove('damage-animation', 'enemy-shooting');
+            alarmLight.classList.add('alarm');
+
+            if (alarmSound) {
+                alarmSound.stop();
+                Tone.Transport.stop();
+            }
+            Tone.start().then(() => {
+                setupAlarmSound();
+                alarmSound.start(0);
+                Tone.Transport.start();
+            });
+        }
+    </script>
+
+</body>
+</html>
